@@ -8,6 +8,15 @@
   const $ = id => document.getElementById(id);
   const status = $("lgd-ref-status");
   let myName = null;
+  let clockOffset = 0; // server time minus this device's time
+
+  function money(value) {
+    return "$" + (Number.isInteger(value) ? value : value.toFixed(2));
+  }
+  function ordinal(n) {
+    const s = ["th", "st", "nd", "rd"], v = n % 100;
+    return n + (s[(v - 20) % 10] || s[v] || s[0]);
+  }
 
   function readAuth() {
     try { return JSON.parse(localStorage.getItem(AUTH_KEY) || "null"); } catch { return null; }
@@ -38,14 +47,15 @@
       if (!data.entries.length) {
         const tr = el("tr");
         const td = el("td", "No invites yet. Be the first legend on the board.", "lgd-empty");
-        td.colSpan = 4;
+        td.colSpan = 5;
         tr.appendChild(td);
         body.appendChild(tr);
       }
       data.entries.forEach(entry => {
         const tr = el("tr");
         if (myName && entry.name === myName) tr.className = "lgd-me-row";
-        tr.append(el("td", entry.rank), el("td", entry.name), el("td", entry.invites), el("td", entry.verified));
+        tr.append(el("td", entry.rank), el("td", entry.name), el("td", entry.invites), el("td", entry.verified),
+          el("td", entry.prize ? money(entry.prize) : "—", entry.prize ? "lgd-prize-cell" : ""));
         body.appendChild(tr);
       });
       $("lgd-board-updated").textContent = "Updated " + new Date(data.updated_at).toLocaleTimeString();
@@ -70,6 +80,8 @@
     $("lgd-me-invites").textContent = me.invites;
     $("lgd-me-verified").textContent = me.verified;
     $("lgd-me-pending").textContent = me.pending;
+    $("lgd-me-prize").hidden = !me.prize;
+    $("lgd-me-prize").textContent = me.prize ? `You're in the prize zone: ${money(me.prize)} right now.` : "";
     $("lgd-ref-login").hidden = true;
     $("lgd-ref-me").hidden = false;
   }
@@ -134,10 +146,99 @@
     loadBoard();
   });
 
+  // ---------- Timer and prizes ----------
+
+  function renderPrizes(prizes) {
+    const box = $("lgd-prizes");
+    box.replaceChildren();
+    prizes.forEach((amount, i) => {
+      const chip = el("div", undefined, "lgd-prize-chip" + (i < 3 ? " lgd-prize-top" : ""));
+      chip.append(el("span", ordinal(i + 1)), el("strong", money(amount)));
+      box.appendChild(chip);
+    });
+    const pool = prizes.reduce((a, b) => a + b, 0);
+    $("lgd-prize-pool").textContent = Number.isInteger(pool) ? pool : pool.toFixed(2);
+    $("lgd-prize-count").textContent = prizes.length;
+  }
+
+  function formatDate(date) {
+    return new Intl.DateTimeFormat(undefined, {
+      weekday: "short", month: "short", day: "numeric",
+      hour: "numeric", minute: "2-digit", timeZoneName: "short"
+    }).format(date);
+  }
+
+  function formatLength(ms) {
+    const hours = Math.round(ms / 3600000);
+    const days = Math.floor(hours / 24), rest = hours % 24;
+    const parts = [];
+    if (days) parts.push(days + (days === 1 ? " day" : " days"));
+    if (rest) parts.push(rest + (rest === 1 ? " hour" : " hours"));
+    return parts.join(" ") || "Under 1 hour";
+  }
+
+  function startTimer(config) {
+    const start = config.starts_at ? new Date(config.starts_at) : null;
+    const end = config.ends_at ? new Date(config.ends_at) : null;
+    if (!start && !end) return;
+
+    const hideAt = end ? end.getTime() + config.hide_after_hours * 3600000 : null;
+    const note = el("p", "", "lgd-phase-note");
+    $("lgd-ref-login").before(note);
+    $("lgd-timer").hidden = false;
+    $("lgd-date-start").textContent = start ? formatDate(start) : "Now";
+    $("lgd-date-end").textContent = end ? formatDate(end) : "Not set";
+    $("lgd-date-length").textContent = start && end ? formatLength(end - start) : "—";
+
+    const pad = n => String(n).padStart(2, "0");
+    let timer;
+
+    function tick() {
+      const now = Date.now() + clockOffset;
+      let phase, target;
+      if (start && now < start) { phase = "upcoming"; target = start; }
+      else if (end && now < end) { phase = "live"; target = end; }
+      else if (end && now < hideAt) { phase = "ended"; }
+      else if (end) { phase = "gone"; }
+      else { phase = "live"; }
+
+      if (phase === "gone") {
+        $("contest").style.display = "none";
+        $("lgd-nav-contest").style.display = "none";
+        clearInterval(timer);
+        return;
+      }
+
+      $("lgd-timer").dataset.phase = phase;
+      $("lgd-timer-label").textContent =
+        phase === "upcoming" ? "CONTEST STARTS IN" : phase === "live" ? "CONTEST ENDS IN" : "CONTEST ENDED";
+      $("lgd-timer-clock").hidden = !target;
+      $("lgd-timer-ended").hidden = phase !== "ended";
+      note.textContent =
+        phase === "upcoming" ? "The contest hasn't started yet. You can get your link now; invites count from the start." :
+        phase === "ended" ? "The contest has ended. New invites no longer count." : "";
+      note.hidden = !note.textContent;
+
+      if (target) {
+        const left = Math.max(0, Math.floor((target - now) / 1000));
+        $("lgd-t-d").textContent = pad(Math.floor(left / 86400));
+        $("lgd-t-h").textContent = pad(Math.floor(left / 3600) % 24);
+        $("lgd-t-m").textContent = pad(Math.floor(left / 60) % 60);
+        $("lgd-t-s").textContent = pad(left % 60);
+      }
+    }
+
+    tick();
+    timer = setInterval(tick, 1000);
+  }
+
   async function init() {
     try {
       const res = await fetch("/api/config");
       const config = await res.json();
+      if (config.server_time) clockOffset = new Date(config.server_time) - Date.now();
+      if (config.prizes) renderPrizes(config.prizes);
+      startTimer(config);
       $("lgd-join-group").href = config.group_url;
       $("lgd-rule-hours").textContent = config.rules.hours;
       $("lgd-rule-msgs").textContent = config.rules.messages;

@@ -254,6 +254,182 @@
   }
 }
 
+/* ---------- Timer and prizes ---------- */
+
+.lgd-contest [hidden] {
+  display: none !important;
+}
+
+.lgd-timer {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 22px;
+  align-items: center;
+  margin-bottom: 16px;
+  padding: clamp(18px, 3vw, 26px);
+  border-radius: 20px;
+  background: var(--deep);
+  color: #fff;
+}
+
+.lgd-timer-label {
+  display: block;
+  margin-bottom: 10px;
+  color: #9bd7b7;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+}
+
+.lgd-timer-clock {
+  display: flex;
+  gap: 10px;
+}
+
+.lgd-timer-clock > div {
+  min-width: 68px;
+  padding: 10px 8px;
+  border-radius: 14px;
+  background: #ffffff14;
+  text-align: center;
+}
+
+.lgd-timer-clock strong {
+  display: block;
+  font-family: Manrope, sans-serif;
+  font-size: clamp(1.6rem, 4vw, 2.3rem);
+  font-weight: 800;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.lgd-timer-clock span {
+  color: #b9dccb;
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+
+.lgd-timer-ended {
+  margin: 0;
+  font-family: Manrope, sans-serif;
+  font-size: clamp(1.2rem, 3vw, 1.6rem);
+  font-weight: 800;
+}
+
+.lgd-timer[data-phase="ended"] {
+  background: #3d4a43;
+}
+
+.lgd-timer-dates {
+  display: grid;
+  gap: 8px;
+  font-size: 0.8rem;
+}
+
+.lgd-timer-dates > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.lgd-timer-dates span {
+  color: #b9dccb;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+
+.lgd-prizes {
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 8px;
+  margin-bottom: 22px;
+}
+
+.lgd-prizes:empty {
+  display: none;
+}
+
+.lgd-prize-chip {
+  padding: 10px 6px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+  text-align: center;
+}
+
+.lgd-prize-chip span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.lgd-prize-chip strong {
+  font-family: Manrope, sans-serif;
+  font-size: 1.05rem;
+  color: var(--deep);
+}
+
+.lgd-prize-top {
+  border-color: var(--gold);
+  background: #fbf5e6;
+}
+
+.lgd-prize-cell {
+  color: var(--green);
+}
+
+.lgd-me-prize {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #fbf5e6;
+  border: 1px solid var(--gold);
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: var(--deep);
+}
+
+.lgd-phase-note {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #f3f7f0;
+  font-size: 0.82rem;
+  color: var(--deep);
+}
+
+@media (max-width: 850px) {
+  .lgd-timer {
+    grid-template-columns: 1fr;
+  }
+
+  .lgd-prizes {
+    grid-template-columns: repeat(5, 1fr);
+  }
+}
+
+@media (max-width: 600px) {
+  .lgd-timer-clock > div {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .lgd-board table {
+    font-size: 0.8rem;
+  }
+
+  .lgd-board th,
+  .lgd-board td {
+    padding-left: 4px;
+    padding-right: 4px;
+  }
+}
+
 /* ---------- Ref landing page ---------- */
 
 .lgd-invite {

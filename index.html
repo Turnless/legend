@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#f7f7f0"><meta property="og:title" content="LEGEND ($LGD) — The Internet Writes the Legend"><meta property="og:description" content="An original internet character, meme culture, and a community-written story on Robinhood Chain."><meta property="og:image" content="assets/brand/legend-header-refined.jpg"><meta name="description" content="LEGEND ($LGD): an internet-native memecoin concept built around character, creativity and community."><title>LEGEND ($LGD) — The Internet Writes the Legend</title><link rel="icon" href="assets/brand/legend-pfp-refined.jpg"><link rel="stylesheet" href="styles.css"><link rel="stylesheet" href="contest.css"></head>
 <body>
-<header class="nav wrap"><a class="wordmark" href="#home" aria-label="Legend home">LEGEND<span>$LGD</span></a><button class="menu" aria-label="Toggle navigation" aria-expanded="false">Menu</button><nav id="navlinks"><a href="#mission">Mission</a><a href="#story">The idea</a><a href="#memes">Meme files</a><a href="#community">Community</a><a href="#contest">Contest</a><a class="nav-cta" href="#token">Token details</a></nav></header>
+<header class="nav wrap"><a class="wordmark" href="#home" aria-label="Legend home">LEGEND<span>$LGD</span></a><button class="menu" aria-label="Toggle navigation" aria-expanded="false">Menu</button><nav id="navlinks"><a href="#mission">Mission</a><a href="#story">The idea</a><a href="#memes">Meme files</a><a href="#community">Community</a><a href="#contest" id="lgd-nav-contest">Contest</a><a class="nav-cta" href="#token">Token details</a></nav></header>
 <main id="home">
 <section class="hero wrap"><div class="hero-copy"><p class="eyebrow"><span class="dot"></span> INTERNET CULTURE · CHARACTER · COMMUNITY</p><h1>The internet writes<br><em>the legend.</em></h1><p class="lead">LEGEND ($LGD) is a crowned character with a sense of humour, a point of view, and a story the community can keep remixing.</p><div class="actions"><a class="button primary" href="#memes">Explore the meme files <span>↗</span></a><a class="button secondary" href="#mission">Read our mission</a></div><p class="small-note">A culture project, not a promise of returns.</p></div><div class="hero-art"><div class="sun"></div><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="art-tag">ORIGINAL CHARACTER<br>COMMUNITY-DRIVEN CULTURE</div><div class="hero-index">LGD / 001</div><img class="hero-mascot" src="assets/brand/legend-pfp-refined.jpg" alt="Legend’s crowned green mascot wearing sunglasses"><div class="mascot-caption"><span class="caption-dot"></span><span><strong>THE LEGEND</strong><small>Born to be remixed</small></span></div><div class="ticker-pill">LEGEND <b>$LGD</b></div><div class="float-sticker sticker-top">STAY ICONIC</div><div class="float-sticker sticker-bottom">CULTURE FIRST</div></div></section>
 <section class="ticker-strip" aria-label="Brand principles"><div class="wrap strip-inner"><span>MEME CULTURE</span><b>✳</b><span>CREATIVE COMMUNITY</span><b>✳</b><span>BUILT FOR THE INTERNET</span><b>✳</b><span>LEGENDARY ENERGY</span><b>✳</b><span>ROBINHOOD CHAIN</span></div></section>
@@ -40,7 +40,25 @@
   </a>
 </div>  </div><div class="community-stamp">LGD<br><span>EST. ON THE INTERNET</span></div></div></section>
 <section id="contest" class="lgd-contest section"><div class="wrap">
-  <div class="section-head"><div><p class="eyebrow">06 / INVITE CONTEST</p><h2>Bring a legend.<br><em>Win from $250.</em></h2></div><p>Invite friends to the LEGEND Telegram with your own link. The more verified invites you bring, the higher you climb.</p></div>
+  <div class="section-head"><div><p class="eyebrow">06 / INVITE CONTEST</p><h2>Bring a legend.<br><em>Top <span id="lgd-prize-count">10</span> share $<span id="lgd-prize-pool">250</span>.</em></h2></div><p>Invite friends to the LEGEND Telegram with your own link. The more verified invites you bring, the higher you climb.</p></div>
+  <div class="lgd-timer" id="lgd-timer" hidden>
+    <div class="lgd-timer-main">
+      <span class="lgd-timer-label" id="lgd-timer-label">STARTS IN</span>
+      <div class="lgd-timer-clock" id="lgd-timer-clock" aria-live="off">
+        <div><strong id="lgd-t-d">00</strong><span>DAYS</span></div>
+        <div><strong id="lgd-t-h">00</strong><span>HRS</span></div>
+        <div><strong id="lgd-t-m">00</strong><span>MIN</span></div>
+        <div><strong id="lgd-t-s">00</strong><span>SEC</span></div>
+      </div>
+      <p class="lgd-timer-ended" id="lgd-timer-ended" hidden>Contest ended. Final results are being checked.</p>
+    </div>
+    <div class="lgd-timer-dates">
+      <div><span>STARTS</span><strong id="lgd-date-start">—</strong></div>
+      <div><span>ENDS</span><strong id="lgd-date-end">—</strong></div>
+      <div><span>DURATION</span><strong id="lgd-date-length">—</strong></div>
+    </div>
+  </div>
+  <div class="lgd-prizes" id="lgd-prizes"></div>
   <div class="lgd-contest-grid">
     <div class="lgd-ref-panel">
       <ol class="lgd-steps">
@@ -62,14 +80,15 @@
           <div><span>VERIFIED</span><strong id="lgd-me-verified">0</strong></div>
           <div><span>PENDING</span><strong id="lgd-me-pending">0</strong></div>
         </div>
+        <p class="lgd-me-prize" id="lgd-me-prize" hidden></p>
         <button type="button" class="lgd-logout" id="lgd-logout">Log out</button>
       </div>
       <p id="lgd-ref-status" class="lgd-ref-status" aria-live="polite"></p>
     </div>
     <div class="lgd-board">
       <div class="lgd-board-head"><h3>Leaderboard</h3><span id="lgd-board-updated">Loading...</span></div>
-      <table><thead><tr><th>#</th><th>Member</th><th>Invited</th><th>Verified</th></tr></thead><tbody id="lgd-board-rows"><tr><td colspan="4" class="lgd-empty">Loading...</td></tr></tbody></table>
-      <p class="lgd-board-note">Ranked by verified invites. Invites that leave the group stop counting. Entries are checked by hand before prizes are paid.</p>
+      <table><thead><tr><th>#</th><th>Member</th><th>Invited</th><th>Verified</th><th>Prize</th></tr></thead><tbody id="lgd-board-rows"><tr><td colspan="5" class="lgd-empty">Loading...</td></tr></tbody></table>
+      <p class="lgd-board-note">Ranked by verified invites, then total invites. Tied places share their prizes. Invites that leave the group stop counting. Entries are checked by hand before prizes are paid.</p>
     </div>
   </div>
 </div></section>
