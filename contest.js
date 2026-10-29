@@ -126,6 +126,7 @@
   window.lgdOnTelegramAuth = function (user) {
     saveAuth(user);
     loadMe(user);
+    window.dispatchEvent(new CustomEvent("lgd-auth", { detail: user }));
   };
 
   $("lgd-copy-link").addEventListener("click", async event => {
@@ -144,6 +145,7 @@
     showLogin();
     setStatus("");
     loadBoard();
+    window.dispatchEvent(new CustomEvent("lgd-auth", { detail: null }));
   });
 
   // ---------- Timer and prizes ----------
