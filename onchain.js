@@ -1,15 +1,9 @@
 // ======================================
 // LEGEND ($LGD) LIVE ONCHAIN DATA
-// Reads the Pons bonding curve straight from Robinhood Chain.
+// Price, market cap and graduation progress from /api/lgd/market.
 // ======================================
 
 (function () {
-  const RPC = "https://rpc.mainnet.chain.robinhood.com";
-  const CURVE = "0x92175de95b1a5f85c719a9dd4fe2e86ed6ce2b6f";
-  const SUPPLY = 1e9;
-  // Pons curves start with 1.68 virtual ETH and graduate at about 4.2 ETH raised.
-  const START_ETH = 1.68;
-  const GRAD_ETH = 4.2;
   const $ = id => document.getElementById(id);
 
   function usd(value) {
@@ -21,40 +15,34 @@
     return "$" + value.toPrecision(4).replace(/(\.\d*?[1-9])0+$/, "$1");
   }
 
-  async function reserves() {
-    const res = await fetch(RPC, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to: CURVE, data: "0x0902f1ac" }, "latest"] })
-    });
-    const data = await res.json();
-    if (!data.result || data.result.length < 130) throw new Error(data.error?.message || "No curve data");
-    const word = i => Number(BigInt("0x" + data.result.slice(2 + i * 64, 66 + i * 64))) / 1e18;
-    return { eth: word(0), tokens: word(1) };
-  }
-
-  async function ethPrice() {
-    const res = await fetch("https://api.coinbase.com/v2/prices/ETH-USD/spot");
-    const data = await res.json();
-    return Number(data.data.amount);
-  }
-
+  // The server reads the chain: the bonding curve before graduation,
+  // the Uniswap v4 pool after it.
   async function load() {
     try {
-      const [curve, ethUsd] = await Promise.all([reserves(), ethPrice().catch(() => NaN)]);
-      const priceEth = curve.eth / curve.tokens;
-      const raised = Math.max(0, curve.eth - START_ETH);
-      const pct = Math.min(100, (raised / GRAD_ETH) * 100);
+      const res = await fetch("/api/lgd/market", { cache: "no-store" });
+      if (!res.ok) throw new Error("Market API returned " + res.status);
+      const m = await res.json();
+      const pct = (m.progress || 0) * 100;
 
-      $("lgd-live-price").textContent = Number.isFinite(ethUsd) ? usd(priceEth * ethUsd) : priceEth.toExponential(3) + " ETH";
-      $("lgd-live-mcap").textContent = Number.isFinite(ethUsd) ? usd(priceEth * SUPPLY * ethUsd) : (priceEth * SUPPLY).toFixed(3) + " ETH";
-      $("lgd-live-eth").textContent = raised.toFixed(raised < 0.1 ? 4 : 3) + " ETH";
-      $("lgd-live-ethusd").textContent = usd(ethUsd);
+      $("lgd-live-price").textContent = m.price_usd ? usd(m.price_usd) : "—";
+      $("lgd-live-mcap").textContent = m.mcap_usd ? usd(m.mcap_usd) : "—";
+      $("lgd-live-ethusd").textContent = usd(m.eth_usd);
+      $("lgd-live-eth").textContent = m.raised_eth == null ? "—" : m.raised_eth.toFixed(m.raised_eth < 0.1 ? 4 : 3) + " ETH";
       $("lgd-curve-pct").textContent = (pct < 1 && pct > 0 ? pct.toFixed(2) : pct.toFixed(1)) + "%";
       $("lgd-curve-fill").style.width = Math.max(pct, 0.6) + "%";
-      if (pct >= 100) $("lgd-curve-note").textContent = "The curve is full. $LGD has graduated to a DEX pool.";
-      $("lgd-live-dot").classList.remove("lgd-offline");
-      $("lgd-live-status").textContent = "Updated " + new Date().toLocaleTimeString() + " · Robinhood Chain";
+
+      const where = m.phase === "dex" ? "Uniswap v4 pool" : "Pons bonding curve";
+      if (m.phase === "dex") {
+        $("lgd-curve-note").textContent = "The curve is full. $LGD has graduated and now trades in its Uniswap v4 pool.";
+      } else if (m.phase === "graduating") {
+        $("lgd-curve-note").textContent = "The curve is full. $LGD is moving to its Uniswap v4 pool right now.";
+      } else {
+        $("lgd-curve-note").textContent = `When the curve raises ${m.threshold_eth} ETH, $LGD graduates to a Uniswap v4 pool.`;
+      }
+      $("lgd-live-dot").classList.toggle("lgd-offline", !m.price_usd);
+      $("lgd-live-status").textContent = m.price_usd
+        ? "Updated " + new Date().toLocaleTimeString() + " · " + where
+        : "Price will be back once the pool is live.";
     } catch (error) {
       console.error("Onchain data error:", error);
       $("lgd-live-dot").classList.add("lgd-offline");

@@ -448,7 +448,6 @@ async def ref_resolve(slug: str = ""):
 
 CHAIN_RPC = "https://rpc.mainnet.chain.robinhood.com"
 LGD_TOKEN = "0x165dc537ec67ce2c033bcfcac562e6c311c7c213"
-LGD_CURVE = "0x92175de95b1a5f85c719a9dd4fe2e86ed6ce2b6f"
 TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 MEME_FEE_WALLET = os.environ.get("MEME_FEE_WALLET", "").strip().lower()
 MEME_STARTS_AT = os.environ.get("MEME_STARTS_AT", "")
@@ -483,16 +482,135 @@ async def chain(method: str, params: list[Any]) -> Any:
     return data.get("result")
 
 
-async def lgd_price_usd() -> float:
-    """USD price of 1 LGD from the Pons curve and Coinbase ETH price, cached 30 s."""
-    if now_ts() - _price_cache.get("ts", 0) < 30:
-        return _price_cache["usd"]
-    raw = await chain("eth_call", [{"to": LGD_CURVE, "data": "0x0902f1ac"}, "latest"])
-    eth, tokens = int(raw[2:66], 16) / 1e18, int(raw[66:130], 16) / 1e18
+# Pons V2 contracts (docs.ponsfamily.com/docs/v2) and the Uniswap v4 PoolManager
+# they graduate into. The PoolManager address comes from the Pons hook's poolManager().
+PONS_FACTORY = "0x7ed598bcef8bd9edd8c97a195c6d13f40801ec7e"
+PONS_HOOK = "0xe5e702641ea86f4ae6cc3cdaed2b886f976be044"
+V4_POOL_MANAGER = "0x8366a39cc670b4001a1121b8f6a443a643e40951"
+NATIVE_ETH = "0x" + "0" * 40
+SEL_LAUNCH = "0x3cf28b5a"      # getLaunchedToken(address)
+SEL_RESERVES = "0x0902f1ac"    # getReserves()
+SEL_RAISED = "0x4f1f58fd"      # realQuoteReserve()
+SEL_THRESHOLD = "0x8b0bc501"   # graduationThreshold()
+SEL_EXTSLOAD = "0x1e2eaeaf"    # extsload(bytes32)
+SEL_SUPPLY = "0x18160ddd"      # totalSupply()
+V4_POOLS_SLOT = 6              # Uniswap v4 StateLibrary.POOLS_SLOT
+PHASES = {0: "curve", 1: "graduating", 2: "dex", 3: "rescued"}
+
+
+def keccak256(data: bytes) -> bytes:
+    """Ethereum keccak-256 (not NIST SHA3), pure Python."""
+    rc = [0x0000000000000001, 0x0000000000008082, 0x800000000000808A, 0x8000000080008000,
+          0x000000000000808B, 0x0000000080000001, 0x8000000080008081, 0x8000000000008009,
+          0x000000000000008A, 0x0000000000000088, 0x0000000080008009, 0x000000008000000A,
+          0x000000008000808B, 0x800000000000008B, 0x8000000000008089, 0x8000000000008003,
+          0x8000000000008002, 0x8000000000000080, 0x000000000000800A, 0x800000008000000A,
+          0x8000000080008081, 0x8000000000008080, 0x0000000080000001, 0x8000000080008008]
+    rot = [[0, 36, 3, 41, 18], [1, 44, 10, 45, 2], [62, 6, 43, 15, 61], [28, 55, 25, 21, 56], [27, 20, 39, 8, 14]]
+    mask = (1 << 64) - 1
+    rate = 136
+    msg = bytearray(data) + b"\x01"
+    msg += b"\x00" * (-len(msg) % rate)
+    msg[-1] |= 0x80
+    st = [[0] * 5 for _ in range(5)]
+    for off in range(0, len(msg), rate):
+        for k in range(rate // 8):
+            st[k % 5][k // 5] ^= int.from_bytes(msg[off + 8 * k:off + 8 * k + 8], "little")
+        for rnd in range(24):
+            c = [st[x][0] ^ st[x][1] ^ st[x][2] ^ st[x][3] ^ st[x][4] for x in range(5)]
+            d = [c[(x - 1) % 5] ^ (((c[(x + 1) % 5] << 1) | (c[(x + 1) % 5] >> 63)) & mask) for x in range(5)]
+            st = [[st[x][y] ^ d[x] for y in range(5)] for x in range(5)]
+            b = [[0] * 5 for _ in range(5)]
+            for x in range(5):
+                for y in range(5):
+                    r = rot[x][y]
+                    b[y][(2 * x + 3 * y) % 5] = ((st[x][y] << r) | (st[x][y] >> (64 - r))) & mask if r else st[x][y]
+            st = [[b[x][y] ^ ((~b[(x + 1) % 5][y]) & b[(x + 2) % 5][y]) for y in range(5)] for x in range(5)]
+            st[0][0] ^= rc[rnd]
+    return b"".join(st[k % 5][k // 5].to_bytes(8, "little") for k in range(4))
+
+
+def word(addr_or_int: str | int, signed: bool = False) -> bytes:
+    if isinstance(addr_or_int, str):
+        return bytes.fromhex(addr_or_int[2:].rjust(64, "0"))
+    return addr_or_int.to_bytes(32, "big", signed=signed)
+
+
+def v4_pool_id(pair: str, token: str, fee: int, tick_spacing: int, hook: str = PONS_HOOK) -> bytes:
+    c0, c1 = sorted([pair.lower(), token.lower()])
+    return keccak256(word(c0) + word(c1) + word(fee) + word(tick_spacing, signed=True) + word(hook))
+
+
+async def eth_call(to: str, data: str) -> bytes:
+    return bytes.fromhex((await chain("eth_call", [{"to": to, "data": data}, "latest"]))[2:])
+
+
+async def eth_usd_price() -> float:
     async with httpx.AsyncClient(timeout=10) as client:
-        eth_usd = float((await client.get("https://api.coinbase.com/v2/prices/ETH-USD/spot")).json()["data"]["amount"])
-    _price_cache.update(ts=now_ts(), usd=eth / tokens * eth_usd)
-    return _price_cache["usd"]
+        return float((await client.get("https://api.coinbase.com/v2/prices/ETH-USD/spot")).json()["data"]["amount"])
+
+
+async def token_market(token: str = LGD_TOKEN) -> dict[str, Any]:
+    """Where a Pons token trades and its price, read from the chain.
+    phase 'curve': bonding curve, 'graduating': moving to the pool (no price),
+    'dex': Uniswap v4 pool. The factory's phase is the authoritative signal."""
+    rec = await eth_call(PONS_FACTORY, SEL_LAUNCH + word(token).hex())
+    w = [rec[i:i + 32] for i in range(0, len(rec), 32)]
+    curve, pair = "0x" + w[1][-20:].hex(), "0x" + w[4][-20:].hex()
+    fee, tick_spacing = int.from_bytes(w[6], "big"), int.from_bytes(w[7], "big", signed=True)
+    threshold, phase = int.from_bytes(w[5], "big") / 1e18, PHASES.get(int.from_bytes(w[10], "big"), "unknown")
+    supply = int.from_bytes(await eth_call(token, SEL_SUPPLY), "big") / 1e18
+    out: dict[str, Any] = {"phase": phase, "pair": pair, "threshold_eth": threshold,
+                           "supply": supply, "price_eth": None, "raised_eth": None, "progress": None}
+
+    if phase == "curve":
+        res = await eth_call(curve, SEL_RESERVES)
+        quote, tokens = int.from_bytes(res[:32], "big"), int.from_bytes(res[32:64], "big")
+        raised = int.from_bytes(await eth_call(curve, SEL_RAISED), "big") / 1e18
+        out.update(price_eth=quote / tokens, raised_eth=raised, progress=min(1.0, raised / threshold) if threshold else None)
+    elif phase == "graduating":
+        out.update(raised_eth=threshold, progress=1.0)  # curve is full; the pool isn't live yet
+    elif phase == "dex":
+        pool_id = v4_pool_id(pair, token, fee, tick_spacing)
+        slot0 = int.from_bytes(await eth_call(V4_POOL_MANAGER, SEL_EXTSLOAD + keccak256(pool_id + word(V4_POOLS_SLOT)).hex()), "big")
+        sqrt_p = slot0 & ((1 << 160) - 1)
+        if sqrt_p:
+            p1_per_0 = sqrt_p * sqrt_p / 2 ** 192
+            token_is_1 = token.lower() > pair.lower()
+            out.update(price_eth=1 / p1_per_0 if token_is_1 else p1_per_0, raised_eth=threshold, progress=1.0,
+                       pool_id="0x" + pool_id.hex())
+    if pair != NATIVE_ETH:
+        out["price_eth"] = None  # only ETH pairs are supported
+    return out
+
+
+async def lgd_market() -> dict[str, Any]:
+    """LGD market with USD values, cached 30 s."""
+    if now_ts() - _price_cache.get("ts", 0) < 30:
+        return _price_cache["market"]
+    m, eth_usd = await token_market(), await eth_usd_price()
+    m["eth_usd"] = eth_usd
+    m["price_usd"] = m["price_eth"] * eth_usd if m["price_eth"] else None
+    m["mcap_usd"] = m["price_usd"] * m["supply"] if m["price_usd"] else None
+    _price_cache.update(ts=now_ts(), market=m)
+    return m
+
+
+async def lgd_price_usd() -> float:
+    """USD price of 1 LGD wherever it trades. Raises while no price is available
+    (e.g. the moment of graduation), so fees are never quoted from a stale price."""
+    price = (await lgd_market())["price_usd"]
+    if not price:
+        raise HTTPException(503, "The LGD price is unavailable right now (it may be moving to the DEX). Try again in a few minutes.")
+    return price
+
+
+@app.get("/api/lgd/market")
+async def lgd_market_api():
+    m = await lgd_market()
+    return JSONResponse({k: m.get(k) for k in (
+        "phase", "price_usd", "price_eth", "mcap_usd", "eth_usd", "raised_eth", "threshold_eth", "progress", "supply")},
+        headers={"Cache-Control": "public, s-maxage=15"})
 
 
 def meme_phase() -> str:
