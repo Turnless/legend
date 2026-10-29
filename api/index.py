@@ -21,6 +21,7 @@ import io
 import json
 import logging
 import math
+import re
 import os
 import random
 import time
@@ -305,6 +306,114 @@ async def on_callback(cb: dict[str, Any]) -> None:
         await tg("answerCallbackQuery", {"callback_query_id": cb["id"]}, quiet=True)
 
 
+# --------------------------------------------------
+# Raid posts: an admin drops an X link, the bot reposts it as a card
+# --------------------------------------------------
+
+TWEET_RE = re.compile(r"(?:https?://)?(?:www\.|mobile\.)?(?:x|twitter)\.com/([A-Za-z0-9_]{1,15})/status(?:es)?/(\d{5,25})\S*", re.I)
+
+
+def tweet_token(tweet_id: str) -> str:
+    """Token X's embed script sends with tweet lookups: (id / 1e15 * pi) in base 36, zeros and dot
+    removed. The lookup only checks that a token is present (tested 2026-10-29), so the exact
+    digit count doesn't matter."""
+    x = int(tweet_id) / 1e15 * math.pi
+    digits = "0123456789abcdefghijklmnopqrstuvwxyz"
+    whole, frac = int(x), x - int(x)
+    out = ""
+    while whole:
+        out = digits[whole % 36] + out
+        whole //= 36
+    out = (out or "0") + "."
+    for _ in range(12):
+        frac *= 36
+        out += digits[int(frac)]
+        frac -= int(frac)
+    return out.replace("0", "").replace(".", "")
+
+
+async def fetch_tweet(tweet_id: str) -> dict[str, Any] | None:
+    """Text, author and first photo of a public post, via X's embed lookup. None if unavailable."""
+    try:
+        async with httpx.AsyncClient(timeout=8, headers={"User-Agent": "Mozilla/5.0"}) as client:
+            r = await client.get("https://cdn.syndication.twimg.com/tweet-result",
+                                 params={"id": tweet_id, "token": tweet_token(tweet_id), "lang": "en"})
+        if r.status_code != 200 or not r.content:
+            return None
+        d = r.json()
+    except Exception:
+        log.exception("tweet lookup failed")
+        return None
+    text = d.get("text", "")
+    start, end = (d.get("display_text_range") or [0, len(text)])[:2]
+    text = text[start:end]
+    for u in (d.get("entities") or {}).get("urls", []):
+        if u.get("url") and u.get("display_url"):
+            text = text.replace(u["url"], u["display_url"])
+    text = html.unescape(re.sub(r"https://t\.co/\w+", "", text)).strip()
+    media = d.get("mediaDetails") or []
+    photo = next((m.get("media_url_https") for m in media if m.get("type") == "photo"), None)
+    if not photo and media:
+        photo = media[0].get("media_url_https")  # video/gif: use its poster image
+    user = d.get("user") or {}
+    return {"author": user.get("screen_name"), "name": user.get("name"), "text": text,
+            "photo": photo, "likes": d.get("favorite_count")}
+
+
+def raid_card(tweet_id: str, author: str, tweet: dict[str, Any] | None, note: str) -> tuple[str, dict[str, Any]]:
+    url = f"https://x.com/{author}/status/{tweet_id}"
+    lines = [f"🐸 <b>New post from @{html.escape(author)}</b>"]
+    if note:
+        lines.append(f"📣 {html.escape(note[:200])}")
+    if tweet and tweet.get("text"):
+        head, _, rest = tweet["text"].partition("\n")
+        lines.append("")
+        lines.append(f"<b>{html.escape(head[:200])}</b>")
+        rest = rest.strip()
+        if rest:
+            lines.append(html.escape(rest[:600] + ("…" if len(rest) > 600 else "")))
+    lines.append("")
+    lines.append(f"🔗 {html.escape(url)}")
+    lines.append("Smash the buttons, legends 👇")
+    markup = {"inline_keyboard": [
+        [{"text": "❤️ Like", "url": f"https://x.com/intent/like?tweet_id={tweet_id}"},
+         {"text": "🔁 Repost", "url": f"https://x.com/intent/retweet?tweet_id={tweet_id}"},
+         {"text": "💬 Reply", "url": f"https://x.com/intent/post?in_reply_to={tweet_id}"}],
+        [{"text": "🐦 Open post", "url": url}],
+    ]}
+    return "\n".join(lines), markup
+
+
+async def maybe_raid(msg: dict[str, Any]) -> bool:
+    """If a group admin posted an X link, replace their message with a raid card. Returns True if handled."""
+    text = msg.get("text") or msg.get("caption") or ""
+    m = TWEET_RE.search(text)
+    if not m:
+        return False
+    if str((msg.get("sender_chat") or {}).get("id")) != GROUP_ID:  # anonymous admins post as the group
+        uid = int((msg.get("from") or {}).get("id", 0))
+        member = await tg("getChatMember", {"chat_id": GROUP_ID, "user_id": uid}, quiet=True) or {}
+        if member.get("status") not in {"creator", "administrator"}:
+            return False
+    author, tweet_id = m.group(1), m.group(2)
+    note = (text[:m.start()] + " " + text[m.end():]).strip()
+    tweet = await fetch_tweet(tweet_id)
+    if tweet and tweet.get("author"):
+        author = tweet["author"]
+    caption, markup = raid_card(tweet_id, author, tweet, note)
+    if tweet and tweet.get("photo"):
+        sent = await tg("sendPhoto", {"chat_id": GROUP_ID, "photo": tweet["photo"], "caption": caption[:1024],
+                                      "parse_mode": "HTML", "reply_markup": markup}, quiet=True)
+        if sent is None:  # photo refused: fall back to text
+            tweet["photo"] = None
+    if not (tweet and tweet.get("photo")):
+        await tg("sendMessage", {"chat_id": GROUP_ID, "text": caption, "parse_mode": "HTML",
+                                 "disable_web_page_preview": True, "reply_markup": markup})
+    await delete_message(msg.get("message_id"))
+    log.info("raid card for %s/%s", author, tweet_id)
+    return True
+
+
 async def on_message(msg: dict[str, Any]) -> None:
     chat = msg.get("chat") or {}
     user = msg.get("from") or {}
@@ -322,6 +431,8 @@ async def on_message(msg: dict[str, Any]) -> None:
     # Keep the chat clean: drop "X joined" / "X left" service messages.
     if msg.get("new_chat_members") or msg.get("left_chat_member"):
         await delete_message(msg.get("message_id"))
+        return
+    if await maybe_raid(msg):
         return
     if not user.get("id") or user.get("is_bot") or msg.get("sender_chat"):
         return
