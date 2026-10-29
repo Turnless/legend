@@ -1,0 +1,10 @@
+{
+  "functions": {
+    "api/index.py": { "maxDuration": 30 }
+  },
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/index.py" },
+    { "source": "/ref", "destination": "/ref.html" },
+    { "source": "/ref/:slug", "destination": "/ref.html" }
+  ]
+}

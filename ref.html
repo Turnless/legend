@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#f7f7f0"><meta property="og:title" content="You're invited to LEGEND ($LGD)"><meta property="og:description" content="Join the LEGEND community on Telegram."><meta property="og:image" content="/assets/brand/legend-header-refined.jpg"><title>Join LEGEND ($LGD)</title><link rel="icon" href="/assets/brand/legend-pfp-refined.jpg"><link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/contest.css"></head>
+<body>
+<header class="nav wrap"><a class="wordmark" href="/" aria-label="Legend home">LEGEND<span>$LGD</span></a></header>
+<main class="lgd-invite wrap">
+  <div class="lgd-invite-card">
+    <img src="/assets/brand/legend-pfp-refined.jpg" alt="LEGEND crowned mascot">
+    <p class="eyebrow" id="lgd-inviter">YOU'RE INVITED</p>
+    <h1>Join the<br><em>LEGEND</em> community.</h1>
+    <p>Memes, culture and the people writing the legend, on Telegram. When you join, tap the right answer to the quick check to unlock chat.</p>
+    <a id="lgd-join" class="button primary" href="https://t.me/the_legend_mm" rel="noopener noreferrer">Join on Telegram <span>↗</span></a>
+    <p class="small-note"><a class="text-link" href="/#contest">See the invite contest leaderboard</a></p>
+  </div>
+</main>
+<script>
+(async function () {
+  // Accepts /ref?alice, /ref?u=alice and /ref/alice.
+  const params = new URLSearchParams(location.search);
+  const bare = location.search.slice(1).split("&")[0];
+  const fromPath = location.pathname.replace(/^\/ref\/?/, "").replace(/\.html$/, "");
+  const slug = decodeURIComponent(params.get("u") || params.get("ref") || (bare.includes("=") ? "" : bare) || fromPath || "");
+  if (!slug) return;
+  try {
+    const res = await fetch("/api/ref/resolve?slug=" + encodeURIComponent(slug));
+    const data = await res.json();
+    if (data.invite_link) document.getElementById("lgd-join").href = data.invite_link;
+    if (data.found) document.getElementById("lgd-inviter").textContent = (data.name + " invited you").toUpperCase();
+  } catch (error) {
+    console.error("Invite lookup failed:", error);
+  }
+})();
+</script>
+</body></html>
