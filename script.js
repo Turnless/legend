@@ -9,7 +9,7 @@ for (let i = 1; i <= 20; i++) {
   const src = `assets/memes/legend-meme-${n}.jpg`;
   const card = document.createElement('div');
   card.className = 'meme-card reveal';
-  card.innerHTML = `<button type="button" class="meme-open" aria-label="Open LEGEND meme ${i}"><img loading="lazy" src="${src}" alt="LEGEND meme ${i}"></button><div class="meme-caption">MEME ${n}<span class="meme-actions"><button type="button" class="meme-view">VIEW ↗</button><a class="meme-save" href="${src}" download="legend-meme-${n}.jpg" aria-label="Download meme ${i}">SAVE ↓</a></span></div>`;
+  card.innerHTML = `<button type="button" class="meme-open" aria-label="Open LEGEND meme ${i}"><img loading="lazy" src="assets/memes/thumbs/legend-meme-${n}.jpg" alt="LEGEND meme ${i}"></button><div class="meme-caption">MEME ${n}<span class="meme-actions"><button type="button" class="meme-view">VIEW ↗</button><a class="meme-save" href="${src}" download="legend-meme-${n}.jpg" aria-label="Download meme ${i}">SAVE ↓</a></span></div>`;
   card.querySelector('.meme-open').addEventListener('click', () => openMeme(i));
   card.querySelector('.meme-view').addEventListener('click', () => openMeme(i));
   grid.appendChild(card);
