@@ -38,8 +38,15 @@ WEBHOOK_SECRET = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
 ADMIN_KEY = os.environ.get("ADMIN_KEY", "")
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
-# Optional ISO time, e.g. 2026-11-15T20:00:00Z. Joins after it are not credited.
+# Optional ISO times, e.g. 2026-11-15T20:00:00Z (UTC) or 2026-11-15T21:00:00+01:00.
+# Only joins between start and end are credited.
+CONTEST_STARTS_AT = os.environ.get("CONTEST_STARTS_AT", "")
 CONTEST_ENDS_AT = os.environ.get("CONTEST_ENDS_AT", "")
+# Prize per place in USD, 1st place first. Ties split the prizes of the places they share.
+PRIZES = [float(x) for x in os.environ.get(
+    "CONTEST_PRIZES", "60,45,35,25,20,15,15,15,10,10").split(",") if x.strip()]
+# The site hides the contest section this many hours after the end.
+HIDE_AFTER_HOURS = 72
 
 CAPTCHA_SECONDS = 300
 LOGIN_MAX_AGE = 30 * 24 * 3600
@@ -54,14 +61,40 @@ def now_ts() -> float:
     return time.time()
 
 
-def contest_open() -> bool:
-    if not CONTEST_ENDS_AT:
-        return True
+def parse_time(value: str) -> datetime | None:
+    if not value:
+        return None
     try:
-        end = datetime.fromisoformat(CONTEST_ENDS_AT.replace("Z", "+00:00"))
+        t = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
     except ValueError:
-        return True
-    return datetime.now(timezone.utc) < end
+        log.error("bad contest time %r", value)
+        return None
+    return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+
+
+def contest_open() -> bool:
+    now = datetime.now(timezone.utc)
+    start, end = parse_time(CONTEST_STARTS_AT), parse_time(CONTEST_ENDS_AT)
+    return (start is None or now >= start) and (end is None or now < end)
+
+
+def assign_prizes(rows: list[dict[str, Any]]) -> list[float]:
+    """Prize per leaderboard row. Needs at least 1 verified invite.
+    Tied rows share the prizes of the places they cover, e.g. two people
+    tied for 3rd split the 3rd and 4th prizes equally."""
+    prizes = [0.0] * len(rows)
+    i = 0
+    while i < len(rows):
+        j = i
+        while j < len(rows) and rows[j]["rank"] == rows[i]["rank"]:
+            j += 1
+        if rows[i]["verified"] > 0:
+            start = int(rows[i]["rank"]) - 1
+            pool = sum(PRIZES[start:start + (j - i)])
+            for k in range(i, j):
+                prizes[k] = round(pool / (j - i), 2)
+        i = j
+    return prizes
 
 
 # --------------------------------------------------
@@ -337,9 +370,13 @@ def check_login(auth: dict[str, Any]) -> dict[str, Any]:
 async def config():
     return JSONResponse(
         {"bot_username": await bot_username(), "group_url": GROUP_URL,
-         "contest_ends_at": CONTEST_ENDS_AT or None,
+         "starts_at": (t := parse_time(CONTEST_STARTS_AT)) and t.isoformat(),
+         "ends_at": (t := parse_time(CONTEST_ENDS_AT)) and t.isoformat(),
+         "hide_after_hours": HIDE_AFTER_HOURS,
+         "server_time": datetime.now(timezone.utc).isoformat(),
+         "prizes": PRIZES,
          "rules": {"hours": 12, "messages": 3}},
-        headers={"Cache-Control": "public, s-maxage=300"},
+        headers={"Cache-Control": "no-store"},
     )
 
 
@@ -350,9 +387,11 @@ async def leaderboard():
     except Exception:
         log.exception("sweep failed")
     rows = await rpc("lgd_leaderboard", p_limit=100) or []
+    prizes = assign_prizes(rows)
     return JSONResponse(
         {"updated_at": datetime.now(timezone.utc).isoformat(),
-         "entries": [{k: r[k] for k in ("rank", "name", "invites", "verified")} for r in rows]},
+         "entries": [{**{k: r[k] for k in ("rank", "name", "invites", "verified")}, "prize": prize}
+                     for r, prize in zip(rows, prizes)]},
         headers={"Cache-Control": "public, s-maxage=30"},
     )
 
@@ -379,6 +418,8 @@ async def ref_me(request: Request):
 
     stats = (await rpc("lgd_my_stats", p_uid=uid) or [{}])[0]
     invites, verified = stats.get("invites", 0), stats.get("verified", 0)
+    top = await rpc("lgd_leaderboard", p_limit=100) or []
+    prize = next((p for r, p in zip(top, assign_prizes(top)) if int(r["telegram_id"]) == uid), 0.0)
     return {
         "slug": slug,
         "name": f"@{user['username']}" if user.get("username") else user.get("first_name"),
@@ -386,6 +427,7 @@ async def ref_me(request: Request):
         "invites": invites,
         "verified": verified,
         "pending": invites - verified,
+        "prize": prize,
     }
 
 
