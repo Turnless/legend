@@ -67,3 +67,11 @@ Entrants pay a fee in LGD (worth $1 at the current price, shown only as an LGD a
    - optional `MEME_FEE_USD` (default `1`).
 3. **Review entries** at `https://YOUR-SITE/api/admin/memes?key=YOUR_ADMIN_KEY`. New entries are hidden until you tap Approve. The page shows each payer wallet and payment link.
 4. Rules enforced by the server: payment checked onchain (LGD, to the fee wallet, full amount, each transaction once), 1 entry per Telegram account and per wallet, group members only, no voting for your own entry, voting only while the contest is open. The contest card hides 72 hours after the end; the meme files stay.
+
+# Invite contest: holder rule
+
+Winners must hold LGD (worth `INVITE_HOLD_USD`, default $2, shown only as an LGD amount) in a wallet they link on the site by signing a free message.
+
+1. **Supabase**: run `supabase/holders.sql` once.
+2. Optional Vercel variable `INVITE_HOLD_USD` (default `2`).
+3. At the end, open `https://YOUR-SITE/api/admin/winners?key=YOUR_ADMIN_KEY`: every prize place with its linked wallet, live LGD balance and `eligible` true/false. Run `/api/admin/audit` first.

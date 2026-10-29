@@ -82,9 +82,57 @@
     $("lgd-me-pending").textContent = me.pending;
     $("lgd-me-prize").hidden = !me.prize;
     $("lgd-me-prize").textContent = me.prize ? `You're in the prize zone: ${money(me.prize)} right now.` : "";
+    showHolder(me);
     $("lgd-ref-login").hidden = true;
     $("lgd-ref-me").hidden = false;
   }
+
+  // ---------- Holder rule ----------
+
+  const lgdAmount = n => Number(n).toLocaleString("en-US", { maximumFractionDigits: 0 });
+
+  function showHolder(h) {
+    $("lgd-hold-need").textContent = h.hold_lgd ? lgdAmount(h.hold_lgd) : "—";
+    const status = $("lgd-hold-status");
+    status.classList.toggle("lgd-ok", Boolean(h.holder));
+    if (!h.wallet) {
+      status.textContent = "No wallet linked yet.";
+      $("lgd-link-wallet").textContent = "Link wallet";
+      return;
+    }
+    const w = h.wallet.slice(0, 6) + "…" + h.wallet.slice(-4);
+    const bal = h.balance_lgd == null ? "?" : lgdAmount(h.balance_lgd);
+    status.textContent = h.holder
+      ? `✓ ${w} holds ${bal} LGD. You're eligible.`
+      : `${w} holds ${bal} LGD. ${h.hold_lgd ? `Buy ${lgdAmount(Math.max(0, h.hold_lgd - (h.balance_lgd || 0)))} more LGD to be eligible.` : ""}`;
+    $("lgd-link-wallet").textContent = "Change wallet";
+  }
+
+  $("lgd-link-wallet").addEventListener("click", async () => {
+    const eth = window.ethereum;
+    const auth = readAuth();
+    if (!eth) {
+      setStatus("No wallet found in this browser. Open this site in your wallet app's browser to link a wallet.", true);
+      return;
+    }
+    try {
+      const [address] = await eth.request({ method: "eth_requestAccounts" });
+      const ts = Math.floor(Date.now() / 1000);
+      const message = `LEGEND invite contest\nLink wallet ${address.toLowerCase()} to Telegram account ${auth.id}\nTime: ${ts}`;
+      setStatus("Sign the message in your wallet. It's free and sends nothing.");
+      const signature = await eth.request({ method: "personal_sign", params: [message, address] });
+      const res = await fetch("/api/ref/wallet", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ auth, address, ts, signature })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || "Could not link the wallet.");
+      showHolder(data);
+      setStatus("Wallet linked.");
+    } catch (error) {
+      setStatus(error.code === 4001 ? "Signing cancelled." : error.message, true);
+    }
+  });
 
   function showLogin() {
     myName = null;

@@ -431,6 +431,7 @@ async def ref_me(request: Request):
         "verified": verified,
         "pending": invites - verified,
         "prize": prize,
+        **(await holder_status(await linked_wallet(uid))),
     }
 
 
@@ -823,6 +824,82 @@ async def meme_vote(request: Request):
 
 
 # --------------------------------------------------
+# Invite contest holder rule: winners must hold LGD in a linked wallet
+# --------------------------------------------------
+
+INVITE_HOLD_USD = float(os.environ.get("INVITE_HOLD_USD", "2"))
+SIGN_MAX_AGE = 15 * 60
+
+
+def wallet_message(address: str, uid: int, ts: int) -> str:
+    return f"LEGEND invite contest\nLink wallet {address.lower()} to Telegram account {uid}\nTime: {ts}"
+
+
+async def recover_signer(message: str, signature: str) -> str | None:
+    """Address that signed `message` with personal_sign, using the chain's ecrecover precompile."""
+    sig = bytes.fromhex(signature.removeprefix("0x"))
+    if len(sig) != 65:
+        return None
+    data = message.encode()
+    digest = keccak256(b"\x19Ethereum Signed Message:\n" + str(len(data)).encode() + data)
+    v = sig[64] if sig[64] >= 27 else sig[64] + 27
+    out = await chain("eth_call", [{"to": "0x0000000000000000000000000000000000000001",
+                                    "data": "0x" + (digest + word(v) + sig[:32] + sig[32:64]).hex()}, "latest"])
+    if not out or len(out) < 66 or int(out, 16) == 0:
+        return None
+    return "0x" + out[-40:].lower()
+
+
+async def lgd_balance(address: str) -> float:
+    return int.from_bytes(await eth_call(LGD_TOKEN, "0x70a08231" + word(address).hex()), "big") / 1e18
+
+
+async def hold_required_lgd() -> int | None:
+    try:
+        return sig3_up(INVITE_HOLD_USD / await lgd_price_usd())
+    except Exception:
+        return None
+
+
+async def linked_wallet(uid: int) -> str | None:
+    try:
+        return await rpc("lgd_get_wallet", p_uid=uid)
+    except Exception:
+        log.exception("wallet lookup failed (is supabase/holders.sql applied?)")
+        return None
+
+
+async def holder_status(wallet: str | None) -> dict[str, Any]:
+    need = await hold_required_lgd()
+    try:
+        bal = await lgd_balance(wallet) if wallet else None
+    except Exception:
+        log.exception("balance check failed")
+        bal = None
+    return {"wallet": wallet, "hold_lgd": need, "balance_lgd": bal,
+            "holder": bool(wallet and need is not None and bal is not None and bal >= need)}
+
+
+@app.post("/api/ref/wallet")
+async def ref_wallet(request: Request):
+    body = await request.json()
+    user = await require_member(body.get("auth"))
+    uid = int(user["id"])
+    address = str(body.get("address", "")).lower()
+    ts = int(body.get("ts", 0))
+    if len(address) != 42 or not address.startswith("0x"):
+        raise HTTPException(400, "That doesn't look like a wallet address.")
+    if abs(now_ts() - ts) > SIGN_MAX_AGE:
+        raise HTTPException(400, "The signature expired. Try again.")
+    signer = await recover_signer(wallet_message(address, uid, ts), str(body.get("signature", "")))
+    if signer != address:
+        raise HTTPException(400, "The signature doesn't match that wallet.")
+    if await rpc("lgd_link_wallet", p_uid=uid, p_wallet=address) == "taken":
+        raise HTTPException(409, "That wallet is already linked to another Telegram account.")
+    return await holder_status(address)
+
+
+# --------------------------------------------------
 # Admin (open in a browser with ?key=ADMIN_KEY)
 # --------------------------------------------------
 
@@ -865,6 +942,23 @@ async def admin_report(key: str = ""):
     for r in rows:
         writer.writerow({c: r.get(c) for c in cols})
     return PlainTextResponse(out.getvalue(), media_type="text/csv")
+
+
+@app.get("/api/admin/winners")
+async def admin_winners(key: str = ""):
+    """Prize places with linked wallets and live LGD balances. Run at the end, before paying."""
+    require_admin(key)
+    rows = await rpc("lgd_winners", p_limit=20) or []
+    prizes = assign_prizes(rows)
+    need = await hold_required_lgd()
+    out = []
+    for r, prize in zip(rows, prizes):
+        bal = await lgd_balance(r["wallet"]) if r.get("wallet") else None
+        out.append({"rank": r["rank"], "name": r["name"], "telegram_id": r["telegram_id"],
+                    "verified": r["verified"], "invites": r["invites"], "prize_usd": prize,
+                    "wallet": r.get("wallet"), "balance_lgd": bal,
+                    "eligible": bool(prize and r.get("wallet") and need and bal is not None and bal >= need)})
+    return {"hold_required_lgd": need, "winners": out}
 
 
 @app.get("/api/admin/audit")

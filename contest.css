@@ -254,6 +254,43 @@
   }
 }
 
+/* ---------- Holder rule ---------- */
+
+.lgd-hold {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+  font-size: 0.82rem;
+}
+
+.lgd-hold p {
+  margin: 0 0 8px;
+  color: var(--muted);
+}
+
+.lgd-hold-status {
+  color: var(--ink) !important;
+  font-weight: 700;
+}
+
+.lgd-hold-status.lgd-ok {
+  color: var(--green) !important;
+}
+
+.lgd-hold .lgd-chip-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 14px;
+  border: 1px solid #cbd7ce;
+  border-radius: 99px;
+  background: #fff;
+  color: var(--deep);
+  font: 700 0.78rem 'DM Sans', sans-serif;
+  cursor: pointer;
+}
+
 /* ---------- Timer and prizes ---------- */
 
 .lgd-contest [hidden] {
